@@ -18,127 +18,96 @@ class _AppleMapsExampleState extends State<AppleMapsExample> {
   Widget build(BuildContext context) {
     return ScaffoldMessenger(
       child: Scaffold(
-        body: SafeArea(
-          child: Stack(
-            children: [
-              Obx(() {
-                print('inside build method called');
-                var annotationList = controller.markerPositions.value;
-                return AppleMap(
-                  mapType: MapType.hybridFlyover,
-                  // onTap: _onMarkerTap,
-                  polygons: controller.polygon,
-                  onLongPress: controller.onLongPress,
-                  compassEnabled: false,
-                  annotations: annotationList.keys.map((markerId) {
-                    return Annotation(
-                      annotationId: markerId,
-                      draggable: true,
-                      icon: BitmapDescriptor.defaultAnnotationWithHue(193),
-                      // icon: iconUniCode != null
-                      //     ? BitmapDescriptor.fromBytes(iconUniCode!)
-                      //     : BitmapDescriptor.defaultAnnotation(20),
-                      position: controller.markerPositions[markerId]!,
-                      onDragStart: (value) => controller.onDragStart(value: value),
-                      onDragEnd: (value) {
-                        controller.onDragEnd(markerId, value, context);
-                      },
-                    );
-                  }).toSet(),
-                  onMapCreated: controller.onMapCreated,
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(0.0, 0.0),
-                  ),
-                  onCameraMove: (position) =>
-                      controller.onCameraMove(position, context),
-                  onCameraIdle: () => controller.onCameraIdeal(),
-                );
-              }),
-              Obx(
-                () => controller.pentagonEnable.value
-                    ? Positioned(
-                        top: 50,
-                        right: 20,
-                        child: ElevatedButton(
-                          style: ButtonStyle(
-                            backgroundColor:
-                                MaterialStateProperty.resolveWith((states) {
-                              if (states.contains(MaterialState.pressed)) {
-                                return Colors.green;
-                              }
-                              return Colors.blue;
-                            }),
-                            textStyle:
-                                MaterialStateProperty.resolveWith((states) {
-                              if (states.contains(MaterialState.pressed)) {
-                                return const TextStyle(fontSize: 40);
-                              }
-                              return const TextStyle(fontSize: 20);
-                            }),
-                          ),
-                          onPressed: () {
-                            controller.getPentagonCoordinates(context);
-                          },
-                          child: const Text(
-                            'Draw',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ))
-                    : const SizedBox(),
-              ),
-              Positioned(
-                top: 10,
-                left: 0,
-                right: 0,
-                child: Center(
-                  child: Column(
-                    children: [
-                      Obx(() => controller.isDraggingPolygon.value
-                          ? const Column(
-                              children: [
-                                Text(
-                                  'Move now',
-                                  style: TextStyle(
-                                      color: Colors.white, fontSize: 30),
-                                ),
-                                SizedBox(
-                                  height: 0,
+          body: SafeArea(
+            child: Stack(
+              children: [
+                Obx(() {
+                  var polygons = controller.polygonList.value;
+                  return AppleMap(
+                    polygons: polygons,
+                    mapType: MapType.hybridFlyover,
+                    compassEnabled: false,
+                    onMapCreated: controller.onMapCreated,
+                    initialCameraPosition: const CameraPosition(
+                      target: LatLng(0.0, 0.0),
+                    ),
+                    onCameraMove: (position) =>controller.onCameraMove(position),
+                  );
+                }),
+                Obx(
+                    ()=>controller.polygonList.isEmpty==true? Positioned(
+                      top: 50,
+                      right: 20,
+                      child: ElevatedButton(
+                        style: ButtonStyle(
+                          backgroundColor:
+                              MaterialStateProperty.resolveWith((states) {
+                            if (states.contains(MaterialState.pressed)) {
+                              return Colors.green;
+                            }
+                            return Colors.blue;
+                          }),
+                          textStyle: MaterialStateProperty.resolveWith((states) {
+                            if (states.contains(MaterialState.pressed)) {
+                              return const TextStyle(fontSize: 40);
+                            }
+                            return const TextStyle(fontSize: 20);
+                          }),
+                        ),
+                        onPressed: () {
+                          controller.drawPolygonAtCenter(context);
+                        },
+                        child: const Text(
+                          'Draw',
+                          style: TextStyle(color: Colors.white),
+                        ),
+                      )):const SizedBox(),
+                ),
+                Positioned(
+                  top: 10,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: Column(
+                      children: [
+                        // const Column(
+                        //   children: [
+                        //     Text(
+                        //       'Move now',
+                        //       style:
+                        //           TextStyle(color: Colors.white, fontSize: 30),
+                        //     ),
+                        //     SizedBox(
+                        //       height: 0,
+                        //     )
+                        //   ],
+                        // ),
+                        Obx(
+                          () => controller.totalArea.value != null
+                              ? Text(
+                                  '${controller.totalArea.value}',
+                                  style: const TextStyle(
+                                      color: Colors.white, fontSize: 25),
                                 )
-                              ],
-                            )
-                          : const SizedBox()),
-                      Obx(
-                        () => controller.totalArea.value != null
-                            ? Text(
-                                '${controller.totalArea.value}',
-                                style: const TextStyle(
-                                    color: Colors.white, fontSize: 25),
-                              )
-                            : const SizedBox(),
-                      ),
-                    ],
+                              : const SizedBox(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        floatingActionButton: Obx(() {
-          var haveMarkerList = controller.markerPositions.isNotEmpty;
-          var pend = !controller.pentagonEnable.value;
-
-          var show = haveMarkerList && pend;
-
-          return show
-              ? FloatingActionButton(
-                  child: const Icon(Icons.clear),
-                  onPressed: () {
-                    controller.onClearAllData();
-                  },
-                )
-              : const SizedBox();
-        }),
-      ),
+          floatingActionButton: Obx(
+            () => controller.polygonList.isNotEmpty == true
+                ? FloatingActionButton(
+                    child: const Icon(Icons.clear),
+                    onPressed: () {
+                      controller.onClearAllData();
+                    },
+                  )
+                : const SizedBox(),
+          )),
     );
   }
 }

@@ -1,3 +1,4 @@
+/*
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
@@ -516,5 +517,236 @@ class AppMapController extends GetxController {
     changeLongPressStatus(false);
     changeDraggingPolygonStatus(false);
     initialDragPosition = null;
+  }
+}
+
+
+ */
+
+import 'dart:async';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:apple_maps_flutter/apple_maps_flutter.dart';
+import 'package:flutter/material.dart';
+import 'package:fluttertoast/fluttertoast.dart';
+import 'package:get/get.dart';
+import 'package:get/get_rx/get_rx.dart';
+import 'package:get/get_rx/src/rx_workers/utils/debouncer.dart';
+import 'package:maps_toolkit/maps_toolkit.dart' as mapTol;
+import 'package:flutter/services.dart';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+import 'package:path_provider/path_provider.dart';
+
+enum MileKeyName { oneMile, twoMile, threeMile }
+
+class AppMapController extends GetxController {
+  AppleMapController? mapController;
+  RxnString totalArea = RxnString();
+  double squareInMiles = 7799999.0;
+  Debouncer moveCameraBouncer =
+      Debouncer(delay: const Duration(milliseconds: 300));
+  var milesInSquare = {
+    MileKeyName.oneMile: (2599999.0),
+    MileKeyName.twoMile: (5199999.0),
+    MileKeyName.threeMile: (7799999.0),
+  };
+  var milesZoomLevel = {
+    MileKeyName.oneMile: (2599999.0),
+    MileKeyName.twoMile: (5199999.0),
+    MileKeyName.threeMile: (14.0),
+  };
+  var defaultZoomLevel = (14.0);
+
+  var polygonList = RxSet<Polygon>();
+
+  @override
+  void onInit() {
+    super.onInit();
+  }
+
+  void onMapCreated(AppleMapController controller) {
+    mapController = controller;
+  }
+
+  Future<void> _deleteCacheDir() async {
+    try {
+      var tempDir = await getTemporaryDirectory();
+
+      if (await tempDir.exists()) {
+        // Get the list of files in the directory
+        var files = tempDir.listSync();
+
+        // Delete each file
+        for (var file in files) {
+          try {
+            if (file is File) {
+              await file.delete();
+            } else if (file is Directory) {
+              await file.delete(recursive: true);
+            }
+          } catch (e) {
+            print("Error deleting file: $e");
+          }
+        }
+        print("Temporary cache cleared");
+      }
+    } catch (e) {
+      print("Error clearing cache: $e");
+    }
+    /* try {
+      var tempDir = await getTemporaryDirectory();
+      if (await tempDir.exists()) {
+        final dir = Directory(tempDir.path);
+        await dir.delete(recursive: true);
+        print("Temporary cache cleared");
+      }
+    } catch (e) {
+      print("Error clearing cache: $e");
+    }*/
+  }
+
+  Future<double> calculateRadiusForAreaa(double area, int numberOfSides) async {
+    return await math.sqrt(
+        (2 * area) / (numberOfSides * math.sin((2 * math.pi) / numberOfSides)));
+  }
+
+  void onClearAllData() async {
+    await _deleteCacheDir();
+    polygonList.clear();
+    totalArea.value = null;
+  }
+
+  Future drawPolygonAtCenter(BuildContext context) async {
+    if (mapController == null) {
+      return true;
+    }
+
+    LatLngBounds bounds = await mapController!.getVisibleRegion();
+    LatLng? center = LatLng(
+      (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
+      (bounds.northeast.longitude + bounds.southwest.longitude) / 2,
+    );
+    var polyList = await getCenterPolyListLatLag(center: center);
+    polygonList.value = await getPolygenList(polyList: polyList);
+    await calculateArea();
+    animateTo(
+        centerPosition: center,
+        zoomLevel: milesZoomLevel[MileKeyName.threeMile]);
+    return true;
+  }
+
+  Future<List<LatLng>> getCenterPolyListLatLag({required LatLng center}) async {
+    var polyList = <LatLng>[];
+    const int numberOfSides = 5;
+    double radiusInMeters =
+        await calculateRadiusForAreaa(squareInMiles, numberOfSides);
+
+    const double angleBetweenVertices = 360.0 / numberOfSides;
+    for (var i = 0; i < numberOfSides; i++) {
+      final double currentAngle = angleBetweenVertices * i;
+      final double angleInRadians = math.pi * currentAngle / 180.0;
+      final double xOffset = math.cos(angleInRadians) * radiusInMeters;
+      final double yOffset = math.sin(angleInRadians) * radiusInMeters;
+      var latLng = LatLng(
+          center.latitude + (yOffset / 111320),
+          center.longitude +
+              (xOffset / (111320 * math.cos(center.latitude * math.pi / 180))));
+      polyList.add(latLng);
+    }
+    return polyList;
+  }
+
+  Future animateTo(
+      {required double? zoomLevel, required LatLng centerPosition}) async {
+    await mapController?.moveCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          heading: 270.0,
+          target: centerPosition,
+          pitch: 0.0,
+          zoom: zoomLevel ?? (14),
+        ),
+      ),
+    );
+  }
+
+  Future calculateArea() async {
+    if (polygonList.isNotEmpty == true) {
+      List<mapTol.LatLng> points = polygonList.first.points
+          .map(
+            (point) => mapTol.LatLng(point.latitude, point.longitude),
+          )
+          .toList();
+      final area =
+          (await mapTol.SphericalUtil.computeArea(points)); // square meters.
+      // Convert area to appropriate units and format it.
+      const sqMetersToSqFeet = 10.7639;
+      const sqMetersToSqMiles = 3.861e-7;
+      String formattedArea;
+      if (area > 2.58999e+6) {
+        // 1 square mile in square meters
+        final areaInSquareMiles = area * sqMetersToSqMiles;
+        formattedArea = '${areaInSquareMiles.toStringAsFixed(2)} sq miles';
+      } else {
+        final areaInSquareFeet = area * sqMetersToSqFeet;
+        if (areaInSquareFeet > 1000) {
+          // formattedArea =
+          //     '${(areaInSquareFeet / 1000).toStringAsFixed(2)} sqft';
+          formattedArea = '${areaInSquareFeet.toInt()} sqft';
+        } else {
+          formattedArea = '${areaInSquareFeet.toStringAsFixed(2)} sqft';
+        }
+      }
+      totalArea.value = formattedArea;
+    }
+  }
+
+  onCameraMove(CameraPosition position) {
+    moveCameraBouncer.cancel();
+    moveCameraBouncer.call(
+      () async {
+        if (polygonList.isNotEmpty) {
+          bool changePolygen = await ableToMove();
+          if (changePolygen) {
+            changePolygenOnMove(center: position.target);
+          } else {}
+        }
+      },
+    );
+  }
+
+  changePolygenOnMove({required LatLng center}) async {
+    var polyList = await getCenterPolyListLatLag(center: center);
+    polygonList.value = await getPolygenList(polyList: polyList);
+    polygonList.refresh();
+    await calculateArea();
+  }
+
+  Future<Set<Polygon>> getPolygenList({required List<LatLng> polyList}) async {
+    return {
+      await Polygon(
+        visible: true,
+        polygonId: PolygonId('1'),
+        // polygonId: PolygonId(math.Random.secure().nextInt(1000).toString()),
+        points: polyList,
+        fillColor: const Color(0xFF00ACDB).withOpacity(0.3),
+        strokeColor: const Color(0xFF00ACDB),
+        strokeWidth: 4,
+      )
+    };
+  }
+
+  Future<bool> ableToMove() async {
+    double threeZoomLevel =
+        (milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel);
+    var zoom = (await mapController?.getZoomLevel() ?? defaultZoomLevel);
+    print('zoom area is ' '${zoom} ${zoom > threeZoomLevel}');
+    if (zoom > threeZoomLevel) {
+      return false;
+    } else {
+      return true;
+    }
+    return true;
   }
 }
