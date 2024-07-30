@@ -519,23 +519,16 @@ class AppMapController extends GetxController {
     initialDragPosition = null;
   }
 }
-
-
  */
 
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:apple_maps_flutter/apple_maps_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:fluttertoast/fluttertoast.dart';
 import 'package:get/get.dart';
-import 'package:get/get_rx/get_rx.dart';
 import 'package:get/get_rx/src/rx_workers/utils/debouncer.dart';
 import 'package:maps_toolkit/maps_toolkit.dart' as mapTol;
-import 'package:flutter/services.dart';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 import 'package:path_provider/path_provider.dart';
 
 enum MileKeyName { oneMile, twoMile, threeMile }
@@ -545,19 +538,30 @@ class AppMapController extends GetxController {
   RxnString totalArea = RxnString();
   double squareInMiles = 7799999.0;
   Debouncer moveCameraBouncer =
-      Debouncer(delay: const Duration(milliseconds: 300));
+  Debouncer(delay: const Duration(milliseconds: 300));
+  var moving=false.obs;
   var milesInSquare = {
     MileKeyName.oneMile: (2599999.0),
     MileKeyName.twoMile: (5199999.0),
     MileKeyName.threeMile: (7799999.0),
   };
   var milesZoomLevel = {
-    MileKeyName.oneMile: (2599999.0),
-    MileKeyName.twoMile: (5199999.0),
-    MileKeyName.threeMile: (14.0),
+    MileKeyName.oneMile: (14.16),
+    MileKeyName.twoMile: (13.50),
+    MileKeyName.threeMile: (13.0),
+    // MileKeyName.oneMile: (12.00),
+    // MileKeyName.twoMile: (13.54),
+    // MileKeyName.threeMile: (14.0),
+    // MileKeyName.oneMile: (13.98),
+    // MileKeyName.twoMile: (13.54),
+    // MileKeyName.threeMile: (14.0),
+    // MileKeyName.oneMile: (13.85),
+    // MileKeyName.twoMile: (13.40),
+    // MileKeyName.threeMile: (14.0),
   };
   var defaultZoomLevel = (14.0);
 
+  var enableCameraMove = false;
   var polygonList = RxSet<Polygon>();
 
   @override
@@ -622,6 +626,7 @@ class AppMapController extends GetxController {
       return true;
     }
 
+    await changeZoomLevel();
     LatLngBounds bounds = await mapController!.getVisibleRegion();
     LatLng? center = LatLng(
       (bounds.northeast.latitude + bounds.southwest.latitude) / 2,
@@ -630,9 +635,21 @@ class AppMapController extends GetxController {
     var polyList = await getCenterPolyListLatLag(center: center);
     polygonList.value = await getPolygenList(polyList: polyList);
     await calculateArea();
-    animateTo(
-        centerPosition: center,
-        zoomLevel: milesZoomLevel[MileKeyName.threeMile]);
+    var animateZoomLevel = await getZoomLevelForPlygen();
+    double threeZoom =
+        milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel;
+    if (animateZoomLevel >= threeZoom) {
+      enableCameraMove = false;
+      await animateTo(centerPosition: center, zoomLevel: animateZoomLevel);
+      await Future.delayed(
+        const Duration(milliseconds: 800),
+            () {
+              moving.value=false;
+          enableCameraMove = true;
+        },
+      );
+    }
+
     return true;
   }
 
@@ -640,7 +657,7 @@ class AppMapController extends GetxController {
     var polyList = <LatLng>[];
     const int numberOfSides = 5;
     double radiusInMeters =
-        await calculateRadiusForAreaa(squareInMiles, numberOfSides);
+    await calculateRadiusForAreaa(squareInMiles, numberOfSides);
 
     const double angleBetweenVertices = 360.0 / numberOfSides;
     for (var i = 0; i < numberOfSides; i++) {
@@ -659,6 +676,17 @@ class AppMapController extends GetxController {
 
   Future animateTo(
       {required double? zoomLevel, required LatLng centerPosition}) async {
+    print('zoomLevel zommLevle ${zoomLevel}');
+    // await mapController?.moveCamera(CameraUpdate.zoomTo(zoomLevel ?? (14)));// 13.98 == 18.79
+
+    // mapController?.moveCamera(
+    //   CameraUpdate.zoomBy(zoomLevel ?? (14)),
+    // ); // 13.98 == 16.06
+
+    // mapController?.moveCamera(
+    //   CameraUpdate.newLatLngZoom(centerPosition, zoomLevel ?? (14)),
+    // ); // 13.98 == 12.99
+
     await mapController?.moveCamera(
       CameraUpdate.newCameraPosition(
         CameraPosition(
@@ -668,7 +696,7 @@ class AppMapController extends GetxController {
           zoom: zoomLevel ?? (14),
         ),
       ),
-    );
+    ); // 13.98 == 13.02
   }
 
   Future calculateArea() async {
@@ -676,10 +704,10 @@ class AppMapController extends GetxController {
       List<mapTol.LatLng> points = polygonList.first.points
           .map(
             (point) => mapTol.LatLng(point.latitude, point.longitude),
-          )
+      )
           .toList();
       final area =
-          (await mapTol.SphericalUtil.computeArea(points)); // square meters.
+      (await mapTol.SphericalUtil.computeArea(points)); // square meters.
       // Convert area to appropriate units and format it.
       const sqMetersToSqFeet = 10.7639;
       const sqMetersToSqMiles = 3.861e-7;
@@ -703,14 +731,17 @@ class AppMapController extends GetxController {
   }
 
   onCameraMove(CameraPosition position) {
+    if(!moving.value) {
+      moving.value = true;
+    }
     moveCameraBouncer.cancel();
     moveCameraBouncer.call(
-      () async {
-        if (polygonList.isNotEmpty) {
-          bool changePolygen = await ableToMove();
-          if (changePolygen) {
-            changePolygenOnMove(center: position.target);
-          } else {}
+          () async {
+        if (polygonList.isNotEmpty && enableCameraMove) {
+          await changeZoomLevel();
+          await getZoomLevelForPlygen();
+          changePolygenOnMove(center: position.target);
+          moving.value=false;
         }
       },
     );
@@ -739,7 +770,7 @@ class AppMapController extends GetxController {
 
   Future<bool> ableToMove() async {
     double threeZoomLevel =
-        (milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel);
+    (milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel);
     var zoom = (await mapController?.getZoomLevel() ?? defaultZoomLevel);
     print('zoom area is ' '${zoom} ${zoom > threeZoomLevel}');
     if (zoom > threeZoomLevel) {
@@ -748,5 +779,202 @@ class AppMapController extends GetxController {
       return true;
     }
     return true;
+  }
+
+  Future changeZoomLevel() async {
+    var zoom = (await mapController?.getZoomLevel() ?? defaultZoomLevel);
+    double oneZoom = milesZoomLevel[MileKeyName.oneMile] ?? defaultZoomLevel;
+    double twoZoom = milesZoomLevel[MileKeyName.twoMile] ?? defaultZoomLevel;
+    double threeZoom =
+        milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel;
+    double one = milesInSquare[MileKeyName.oneMile] ?? defaultZoomLevel;
+    double two = milesInSquare[MileKeyName.twoMile] ?? defaultZoomLevel;
+    double three = milesInSquare[MileKeyName.threeMile] ?? defaultZoomLevel;
+    // MileKeyName.oneMile: (12.00),
+    // MileKeyName.twoMile: (13.54),
+    // MileKeyName.threeMile: (14.0),
+
+    // MileKeyName.oneMile: (14.16),
+    // MileKeyName.twoMile: (13.50),
+    // MileKeyName.threeMile: (13.0),
+
+    if (zoom > oneZoom) {
+      print(
+          '--------------===----------------------------===--------one--$zoom----changeZoomLevel ${threeZoom}');
+      squareInMiles = one;
+    } else if (zoom < oneZoom && zoom > threeZoom) {
+      print(
+          '--------------===----------------------------===-------two--$zoom-----changeZoomLevel ${twoZoom}');
+      squareInMiles = two;
+    } else {
+      print(
+          '--------------===----------------------------===------three $zoom--------changeZoomLevel ${oneZoom}');
+      squareInMiles = three;
+    }
+
+    // if(zoom<threeZoom){
+    //   print('--------------===----------------------------===--------three--$zoom----changeZoomLevel ${threeZoom}');
+    //   squareInMiles = three;
+    // }else if(zoom>twoZoom && zoom<threeZoom){
+    //   print('--------------===----------------------------===-------two--$zoom-----changeZoomLevel ${twoZoom}');
+    //   squareInMiles = two;
+    // }else{
+    //   print('--------------===----------------------------===------one $zoom--------changeZoomLevel ${oneZoom}');
+    //   squareInMiles = one;
+    // }
+
+    // if (zoom >= oneZoom) {
+    //   print('--------------===----------------------------===------one $zoom--------changeZoomLevel ${oneZoom}');
+    //   squareInMiles = one;
+    // } else if (zoom <= oneZoom && zoom >= twoZoom ) {
+    //   // value > twoMile && value <= threeMile
+    //   print('--------------===----------------------------===-------two--$zoom-----changeZoomLevel ${twoZoom}');
+    //   squareInMiles = two;
+    // } else {
+    //   print('--------------===----------------------------===--------three--$zoom----changeZoomLevel ${threeZoom}');
+    //   squareInMiles = three;
+    // }
+    return true;
+  }
+
+  Future<double> getZoomLevelForPlygen() async {
+    var zoom = (await mapController?.getZoomLevel() ?? defaultZoomLevel);
+    double oneZoom = milesZoomLevel[MileKeyName.oneMile] ?? defaultZoomLevel;
+    double twoZoom = milesZoomLevel[MileKeyName.twoMile] ?? defaultZoomLevel;
+    double threeZoom =
+        milesZoomLevel[MileKeyName.threeMile] ?? defaultZoomLevel;
+    if (zoom > oneZoom) {
+      print(
+          '--------------===----------------------------===--$zoom----one-------- ${oneZoom}');
+      return oneZoom;
+    } else if (zoom < oneZoom && zoom > threeZoom) {
+      print(
+          '--------------===----------------------------===---$zoom----two------- ${twoZoom}');
+      return twoZoom;
+    } else {
+      print(
+          '--------------===----------------------------===---$zoom-----three------ ${threeZoom}');
+      return threeZoom;
+    }
+
+    if (zoom < threeZoom) {
+      print(
+          '--------------===----------------------------===---$zoom-----three------ ${threeZoom}');
+      return threeZoom;
+    } else if (zoom > twoZoom && zoom < threeZoom) {
+      print(
+          '--------------===----------------------------===---$zoom----two------- ${twoZoom}');
+      return twoZoom;
+    } else {
+      print(
+          '--------------===----------------------------===--$zoom----one-------- ${oneZoom}');
+      return oneZoom;
+    }
+    if (zoom >= oneZoom) {
+      print(
+          '--------------===----------------------------===--$zoom----one-------- ${oneZoom}');
+      return oneZoom;
+    } else if (zoom <= oneZoom && zoom >= twoZoom) {
+      print(
+          '--------------===----------------------------===---$zoom----two------- ${twoZoom}');
+      return twoZoom;
+    } else {
+      print(
+          '--------------===----------------------------===---$zoom-----three------ ${threeZoom}');
+      return threeZoom;
+    }
+  }
+
+  double calculateWidth() {
+    List<LatLng> polygonCoordinates = [];
+    if (polygonList.isNotEmpty) {
+      polygonCoordinates = polygonList.first.points;
+    }
+    if (polygonCoordinates.isEmpty) {
+      return 20;
+    }
+
+
+    // Calculate the center of the polygon
+    double centerLat = polygonCoordinates.map((p) => p.latitude).reduce((value,
+        element) => value + element) / polygonCoordinates.length;
+    double centerLng = polygonCoordinates.map((p) => p.longitude).reduce((value,
+        element) => value + element) / polygonCoordinates.length;
+    LatLng center = LatLng(centerLat, centerLng);
+
+    // Calculate distances to corners
+    double maxWidth = 0;
+    for (LatLng point in polygonCoordinates) {
+      double distance = calculateDistanceInMeters(center, point);
+      if (distance > maxWidth) {
+        maxWidth = distance;
+      }
+    }
+
+    return maxWidth * 2; // Multiply by 2 to get the full width
+    double minLng = double.infinity;
+    double maxLng = -double.infinity;
+    for (LatLng point in polygonCoordinates) {
+      minLng = math.min(minLng, point.longitude);
+      maxLng = math.max(maxLng, point.longitude);
+    }
+
+    return (maxLng - minLng).abs();
+  }
+
+  double calculateHeight() {
+    List<LatLng> polygonCoordinates = [];
+    if (polygonList.isNotEmpty) {
+      polygonCoordinates = polygonList.first.points;
+    }
+    if (polygonCoordinates.isEmpty) {
+      return 20;
+    }
+    // Calculate the center of the polygon
+    double centerLat = polygonCoordinates.map((p) => p.latitude).reduce((value,
+        element) => value + element) / polygonCoordinates.length;
+    double centerLng = polygonCoordinates.map((p) => p.longitude).reduce((value,
+        element) => value + element) / polygonCoordinates.length;
+    LatLng center = LatLng(centerLat, centerLng);
+
+    // Calculate distances to corners
+    double maxHeight = 0;
+    for (LatLng point in polygonCoordinates) {
+      double distance = calculateDistanceInMeters(center, point);
+      if (distance > maxHeight) {
+        maxHeight = distance;
+      }
+    }
+
+    return maxHeight; // Multiply by 2 to get the full height
+
+    double minLat = double.infinity;
+    double maxLat = -double.infinity;
+    for (LatLng point in polygonCoordinates) {
+      minLat = math.min(minLat, point.latitude);
+      maxLat = math.max(maxLat, point.latitude);
+    }
+
+    return (maxLat - minLat).abs();
+  }
+
+
+  double calculateDistanceInMeters(LatLng point1, LatLng point2) {
+    const double _earthRadius = 6371000.0; // Earth's radius in meters
+    double lat1Rad = point1.latitude * (math.pi / 180);
+    double lng1Rad = point1.longitude * (math.pi / 180);
+    double lat2Rad = point2.latitude * (math.pi / 180);
+    double lng2Rad = point2.longitude * (math.pi / 180);
+
+    double dLat = lat2Rad - lat1Rad;
+    double dLng = lng2Rad - lng1Rad;
+
+    double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(lat1Rad) * math.cos(lat2Rad) *
+            math.sin(dLng / 2) * math.sin(dLng / 2);
+    double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+
+
+    return _earthRadius * c;
   }
 }
